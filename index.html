@@ -134,7 +134,10 @@ let wordIndex = null;
 
 // Justera bara denna om du inte använder mappen tfjs_model
 const MODEL_PATH = "./tfjs_model/model.json";
-const META_PATH  = "./metadata.json";
+const META_PATH  = "./tfjs_model/metadata.json";
+
+// Fix av Axel
+//const META_PATH  = "./metadata.json";
 
 const btnLoad = document.getElementById("btnLoad");
 const btnPredict = document.getElementById("btnPredict");
@@ -270,6 +273,7 @@ Sekvens (första 20): [${seq.slice(0, 20).join(", ")}]`;
 </script>
 </body>
 </html>
+
 
 
 
