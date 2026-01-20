@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SMS-Spamfilter (TF2 → TFJS)</title>
+
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      margin: 16px;
+      max-width: 900px;
+      padding-bottom: 90px;
+    }
+    textarea {
+      width: 100%;
+      min-height: 120px;
+      padding: 10px;
+      font-size: 16px;
+    }
+    button {
+      padding: 10px 14px;
+      margin-top: 10px;
+      font-size: 16px;
+    }
+    .box {
+      border: 1px solid #ddd;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 14px;
+    }
+    .mono {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+    .small {
+      font-size: 13px;
+      opacity: 0.9;
+      line-height: 1.35;
+    }
+    .warn {
+      background: #fff7d6;
+      border: 1px solid #f2d37a;
+      padding: 10px 12px;
+      border-radius: 10px;
+      margin-top: 10px;
+    }
+    .examples button {
+      margin-right: 8px;
+      margin-top: 8px;
+    }
+
+    /* Footer / statusbar */
+    footer.statusbar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: #111;
+      color: #fff;
+      padding: 10px 14px;
+      font-size: 13px;
+      border-top: 1px solid rgba(255,255,255,0.15);
+      z-index: 999;
+    }
+    footer.statusbar .row {
+      display: flex;
+      gap: 14px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    footer.statusbar .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.12);
+      white-space: nowrap;
+    }
+    footer.statusbar .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #999;
+      display: inline-block;
+    }
+    footer.statusbar .dot.ok { background: #27c93f; }
+    footer.statusbar .dot.bad { background: #ff5f56; }
+  </style>
+</head>
+
+<body>
+  <h1>📩 SMS-Spamfilter</h1>
+
+  <p>
+    Denna webbsida använder en maskininlärningsmodell tränad i
+    <strong>TensorFlow 2</strong> och körs i webbläsaren via
+    <strong>TensorFlow.js</strong>.
+  </p>
+
+  <div class="warn small">
+    <strong>Viktigt:</strong> Modellen är tränad på
+    <strong>engelska SMS</strong>.
+    Testa med engelska exempel som
+    <span class="mono">"Call me when you arrive"</span>.
+    Svenska meddelanden blir ofta felklassificerade eftersom orden inte finns
+    i träningsdatan.
+  </div>
+
+  <div class="box">
+    <button id="btnLoad">1) Ladda modell</button>
+    <span id="status" class="mono">Status: redo</span>
+  </div>
+
+  <div class="box">
+    <h2>Testa modellen</h2>
+
+    <div class="examples small">
+      <strong>Exempel:</strong><br>
+      <button type="button" id="exHam">Exempel: ham</button>
+      <button type="button" id="exSpam">Exempel: spam</button>
+    </div>
+
+    <textarea id="input" placeholder="Klistra in ett SMS här…"></textarea>
+    <button id="btnPredict" disabled>2) Klassificera</button>
+
+    <div class="box">
+      <h3>Resultat</h3>
+      <pre id="out" class="mono">-</pre>
+    </div>
+  </div>
+
+  <!-- FOOTER / STATUSBAR -->
+  <footer class="statusbar">
+    <div class="row">
+      <div class="pill">
+        <span id="sbDot" class="dot bad"></span>
+        <span id="sbState">Model: not loaded</span>
+      </div>
+      <div class="pill mono" id="sbModel">model: ./tfjs_model/model.json</div>
+      <div class="pill mono" id="sbTfjs">tfjs: -</div>
+      <div class="pill mono" id="sbMeta">dataset: -</div>
+    </div>
+  </footer>
+
+<script>
+let model = null;
+let wordIndex = null;
+let info = null;
+
+const MODEL_PATH = "./tfjs_model/model.json";
+
+const btnLoad = document.getElementById("btnLoad");
+const btnPredict = document.getElementById("btnPredict");
+const statusEl = document.getElementById("status");
+const inputEl = document.getElementById("input");
+const outEl = document.getElementById("out");
+
+const exHamBtn = document.getElementById("exHam");
+const exSpamBtn = document.getElementById("exSpam");
+
+const sbDot = document.getElementById("sbDot");
+const sbState = document.getElementById("sbState");
+const sbModel = document.getElementById("sbModel");
+const sbTfjs = document.getElementById("sbTfjs");
+const sbMeta = document.getElementById("sbMeta");
+
+function setStatus(s) {
+  statusEl.textContent = "Status: " + s;
+}
+
+function setStatusBar(loaded, message) {
+  sbDot.classList.remove("ok", "bad");
+  sbDot.classList.add(loaded ? "ok" : "bad");
+  sbState.textContent = message;
+  sbModel.textContent = "model: " + MODEL_PATH;
+  sbTfjs.textContent = "tfjs: " + (window.tf?.version?.tfjs || "-");
+
+  if (info) {
+    sbMeta.textContent =
+      `dataset: ${info.dataset} | samples: ${info.num_samples} | lang: ${info.language}`;
+  }
+}
+
+async function loadJson(path) {
+  const r = await fetch(path, { cache: "no-store" });
+  if (!r.ok) throw new Error(`Kunde inte ladda ${path}`);
+  return r.json();
+}
+
+function cleanText(s) {
+  return s
+    .toLowerCase()
+    .replace(/[\u2019]/g, "'")
+    .replace(/[^a-z0-9\s']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function textToSequence(text) {
+  const tokens = cleanText(text).split(" ");
+  const seq = new Array(info.max_len).fill(0);
+  for (let i = 0; i < Math.min(tokens.length, info.max_len); i++) {
+    seq[i] = wordIndex[tokens[i]] ?? info.oov_index;
+  }
+  return seq;
+}
+
+exHamBtn.onclick = () => {
+  inputEl.value = "Hey, are we still meeting at 6? Call me when you arrive.";
+};
+exSpamBtn.onclick = () => {
+  inputEl.value = "CONGRATS! You have won a FREE prize. Text WIN to 80082 now!";
+};
+
+btnLoad.onclick = async () => {
+  try {
+    setStatus("laddar…");
+    info = await loadJson("./model_info.json");
+    wordIndex = await loadJson("./word_index.json");
+    model = await tf.loadLayersModel(MODEL_PATH);
+
+    model.predict(tf.zeros([1, info.max_len], "int32")).dispose();
+
+    btnPredict.disabled = false;
+    setStatus("modell laddad");
+    setStatusBar(true, "Model: loaded");
+  } catch (e) {
+    console.error(e);
+    setStatus("fel vid laddning");
+    setStatusBar(false, "Model: load failed");
+  }
+};
+
+btnPredict.onclick = async () => {
+  const seq = textToSequence(inputEl.value || "");
+  const x = tf.tensor2d([seq], [1, info.max_len], "int32");
+  const y = model.predict(x);
+  const prob = (await y.data())[0];
+  x.dispose();
+  y.dispose();
+
+  const label = prob >= 0.5 ? "spam" : "ham";
+
+  outEl.textContent =
+`Klass: ${label}
+Spam-sannolikhet: ${(prob * 100).toFixed(1)} %
+
+Observera: modellen är tränad på ENGELSK text.`;
+};
+</script>
+</body>
+</html>
