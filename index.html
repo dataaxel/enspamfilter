@@ -213,7 +213,7 @@ btnLoad.onclick = async () => {
     if (!wordIndex || typeof wordIndex !== "object") {
       throw new Error("metadata.json saknar word_index (eller har oväntat format).");
     }
-
+    // Ändrad av Axel för att tvinga refresh vid ny laddning
     model = await tf.loadLayersModel(MODEL_PATH + "?v=" + Date.now());
 
 
@@ -270,4 +270,5 @@ Sekvens (första 20): [${seq.slice(0, 20).join(", ")}]`;
 </script>
 </body>
 </html>
+
 
