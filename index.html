@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>SMS-Spamfilter (TF2 → TFJS)</title>
+  <title>SMS-Spamfilter (TFJS)</title>
 
   <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
 
@@ -12,7 +12,7 @@
       font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
       margin: 16px;
       max-width: 900px;
-      padding-bottom: 90px;
+      padding-bottom: 80px;
     }
     textarea {
       width: 100%;
@@ -31,14 +31,8 @@
       padding: 14px;
       margin-top: 14px;
     }
-    .mono {
-      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    }
-    .small {
-      font-size: 13px;
-      opacity: 0.9;
-      line-height: 1.35;
-    }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .small { font-size: 13px; opacity: 0.9; line-height: 1.35; }
     .warn {
       background: #fff7d6;
       border: 1px solid #f2d37a;
@@ -46,17 +40,11 @@
       border-radius: 10px;
       margin-top: 10px;
     }
-    .examples button {
-      margin-right: 8px;
-      margin-top: 8px;
-    }
+    .examples button { margin-right: 8px; margin-top: 8px; }
 
-    /* Footer / statusbar */
     footer.statusbar {
       position: fixed;
-      left: 0;
-      right: 0;
-      bottom: 0;
+      left: 0; right: 0; bottom: 0;
       background: #111;
       color: #fff;
       padding: 10px 14px;
@@ -98,18 +86,12 @@
   <h1>📩 SMS-Spamfilter</h1>
 
   <p>
-    Denna webbsida använder en maskininlärningsmodell tränad i
-    <strong>TensorFlow 2</strong> och körs i webbläsaren via
-    <strong>TensorFlow.js</strong>.
+    Skriv ett SMS och klicka “Klassificera”. Modellen körs lokalt i webbläsaren via TensorFlow.js.
   </p>
 
   <div class="warn small">
-    <strong>Viktigt:</strong> Modellen är tränad på
-    <strong>engelska SMS</strong>.
-    Testa med engelska exempel som
-    <span class="mono">"Call me when you arrive"</span>.
-    Svenska meddelanden blir ofta felklassificerade eftersom orden inte finns
-    i träningsdatan.
+    <strong>Viktigt:</strong> Modellen är tränad på <strong>engelska SMS</strong>.
+    Testa med engelska exempel som <span class="mono">"Call me when you arrive"</span>.
   </div>
 
   <div class="box">
@@ -135,25 +117,24 @@
     </div>
   </div>
 
-  <!-- FOOTER / STATUSBAR -->
-  <footer class="statusbar">
+  <footer class="statusbar" aria-label="Statusbar">
     <div class="row">
       <div class="pill">
         <span id="sbDot" class="dot bad"></span>
         <span id="sbState">Model: not loaded</span>
       </div>
-      <div class="pill mono" id="sbModel">model: ./tfjs_model/model.json</div>
+      <div class="pill mono" id="sbModel">model: -</div>
       <div class="pill mono" id="sbTfjs">tfjs: -</div>
-      <div class="pill mono" id="sbMeta">dataset: -</div>
     </div>
   </footer>
 
 <script>
 let model = null;
 let wordIndex = null;
-let info = null;
 
+// Justera bara denna om du inte använder mappen tfjs_model
 const MODEL_PATH = "./tfjs_model/model.json";
+const META_PATH  = "./metadata.json";
 
 const btnLoad = document.getElementById("btnLoad");
 const btnPredict = document.getElementById("btnPredict");
@@ -168,7 +149,6 @@ const sbDot = document.getElementById("sbDot");
 const sbState = document.getElementById("sbState");
 const sbModel = document.getElementById("sbModel");
 const sbTfjs = document.getElementById("sbTfjs");
-const sbMeta = document.getElementById("sbMeta");
 
 function setStatus(s) {
   statusEl.textContent = "Status: " + s;
@@ -180,19 +160,15 @@ function setStatusBar(loaded, message) {
   sbState.textContent = message;
   sbModel.textContent = "model: " + MODEL_PATH;
   sbTfjs.textContent = "tfjs: " + (window.tf?.version?.tfjs || "-");
-
-  if (info) {
-    sbMeta.textContent =
-      `dataset: ${info.dataset} | samples: ${info.num_samples} | lang: ${info.language}`;
-  }
 }
 
 async function loadJson(path) {
   const r = await fetch(path, { cache: "no-store" });
-  if (!r.ok) throw new Error(`Kunde inte ladda ${path}`);
+  if (!r.ok) throw new Error(`Kunde inte ladda ${path} (HTTP ${r.status})`);
   return r.json();
 }
 
+// Enkel textstädning (räcker för AI1)
 function cleanText(s) {
   return s
     .toLowerCase()
@@ -202,14 +178,21 @@ function cleanText(s) {
     .trim();
 }
 
-function textToSequence(text) {
-  const tokens = cleanText(text).split(" ");
-  const seq = new Array(info.max_len).fill(0);
-  for (let i = 0; i < Math.min(tokens.length, info.max_len); i++) {
-    seq[i] = wordIndex[tokens[i]] ?? info.oov_index;
+function textToSequence(text, maxLen, oovIndex) {
+  const t = cleanText(text);
+  const tokens = t.length ? t.split(" ") : [];
+
+  const seq = new Array(maxLen).fill(0);
+  for (let i = 0; i < Math.min(tokens.length, maxLen); i++) {
+    const w = tokens[i];
+    const idx = wordIndex[w];
+    seq[i] = (idx !== undefined) ? idx : oovIndex;
   }
   return seq;
 }
+
+// Init footer
+setStatusBar(false, "Model: not loaded");
 
 exHamBtn.onclick = () => {
   inputEl.value = "Hey, are we still meeting at 6? Call me when you arrive.";
@@ -221,27 +204,56 @@ exSpamBtn.onclick = () => {
 btnLoad.onclick = async () => {
   try {
     setStatus("laddar…");
-    info = await loadJson("./model_info.json");
-    wordIndex = await loadJson("./word_index.json");
+    setStatusBar(false, "Loading model…");
+
+    // metadata.json innehåller word_index
+    const meta = await loadJson(META_PATH);
+    wordIndex = meta.word_index || meta.wordIndex || meta;
+
+    if (!wordIndex || typeof wordIndex !== "object") {
+      throw new Error("metadata.json saknar word_index (eller har oväntat format).");
+    }
+
     model = await tf.loadLayersModel(MODEL_PATH);
 
-    model.predict(tf.zeros([1, info.max_len], "int32")).dispose();
+    // Läs maxLen från modellen (input shape: [null, maxLen])
+    const maxLen = model.inputs?.[0]?.shape?.[1];
+    if (!maxLen) throw new Error("Kunde inte läsa max_len från modellen.");
+
+    // OOV-index: använd <OOV> om den finns, annars 1
+    const oovIndex = wordIndex["<OOV>"] ?? 1;
+
+    // Sanity check
+    model.predict(tf.zeros([1, maxLen], "int32")).dispose();
+
+    // Spara parametrar på model-objektet så predict vet dem
+    model._maxLen = maxLen;
+    model._oovIndex = oovIndex;
 
     btnPredict.disabled = false;
-    setStatus("modell laddad");
+    setStatus("modell laddad ✅");
     setStatusBar(true, "Model: loaded");
   } catch (e) {
     console.error(e);
-    setStatus("fel vid laddning");
+    setStatus("fel vid laddning: " + (e.message || e));
+    outEl.textContent = "LOAD ERROR:\n" + (e.stack || e.message || e);
     setStatusBar(false, "Model: load failed");
   }
 };
 
 btnPredict.onclick = async () => {
-  const seq = textToSequence(inputEl.value || "");
-  const x = tf.tensor2d([seq], [1, info.max_len], "int32");
+  if (!model) return;
+
+  const text = inputEl.value || "";
+  const maxLen = model._maxLen;
+  const oovIndex = model._oovIndex;
+
+  const seq = textToSequence(text, maxLen, oovIndex);
+
+  const x = tf.tensor2d([seq], [1, maxLen], "int32");
   const y = model.predict(x);
   const prob = (await y.data())[0];
+
   x.dispose();
   y.dispose();
 
@@ -251,7 +263,8 @@ btnPredict.onclick = async () => {
 `Klass: ${label}
 Spam-sannolikhet: ${(prob * 100).toFixed(1)} %
 
-Observera: modellen är tränad på ENGELSK text.`;
+Rensad input: "${cleanText(text)}"
+Sekvens (första 20): [${seq.slice(0, 20).join(", ")}]`;
 };
 </script>
 </body>
