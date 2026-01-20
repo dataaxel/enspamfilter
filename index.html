@@ -214,7 +214,8 @@ btnLoad.onclick = async () => {
       throw new Error("metadata.json saknar word_index (eller har oväntat format).");
     }
 
-    model = await tf.loadLayersModel(MODEL_PATH);
+    model = await tf.loadLayersModel(MODEL_PATH + "?v=" + Date.now());
+
 
     // Läs maxLen från modellen (input shape: [null, maxLen])
     const maxLen = model.inputs?.[0]?.shape?.[1];
@@ -269,3 +270,4 @@ Sekvens (första 20): [${seq.slice(0, 20).join(", ")}]`;
 </script>
 </body>
 </html>
+
